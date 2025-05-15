@@ -1,0 +1,325 @@
+---
+title: "Thesis"
+author: "Zoé Ricardie"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(httr)
+library(stringr)
+library(readr)
+library(progress) 
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(readxl)
+library(readr)
+library(lubridate)
+```
+
+# Data set and data analysis 
+
+```{r}
+
+#Loading the data set
+
+modi_data <- read_excel("~/Downloads/Modi data set.xlsx")
+trump_data <- read_excel("~/Downloads/Trump data set.xlsx")
+api_key <- ""
+
+#Cleaning the data
+
+modi_data <- modi_data %>%
+  mutate(Text = tolower(Text))
+
+trump_data <- trump_data %>%
+  mutate(Text = tolower(Text))
+
+send_to_gpt <- function(text, api_key, model = "gpt-4o-mini", temperature = 0.3) {
+  
+  url <- "https://api.openai.com/v1/chat/completions"
+  
+  response <- POST(
+    url = url,
+    add_headers(Authorization = paste("Bearer", api_key)),
+    content_type_json(),
+    encode = "json",
+    body = list(
+      model = model, 
+      messages = list(list(role = "user", content = text))
+    )
+  )
+  parsed_response <- content(response, as = "parsed")
+  if (!is.null(parsed_response$choices) && length(parsed_response$choices) > 0) {
+    return(parsed_response$choices[[1]]$message$content)
+  } else {
+    print("Error: No valid response from API.")
+    return(NULL)
+  }
+}
+
+# Function to analyze populist rhetoric count in Trump speeches
+analyze_trump_populism <- function(text) {
+  prompt <- paste(
+    "Analyze the following text and count the total number of individual uses of populist rhetoric.",  
+    "For every sentence or phrase that contains populist rhetoric — including repeated patterns — count each instance separately.",  
+    "Use these criteria: (1) references to ‘the people’ vs. ‘the elite’,",  
+    "(2) portraying the elite as corrupt or self-serving,",  
+    "(3) presenting the speaker as the true voice of the people,",  
+    "(4) using emotional or crisis language to polarize,",  
+    "(5) undermining the legitimacy of political or democratic institutions,",  
+    "(6) undermining the legitimacy or credibility of political opponents or other candidates.",  
+    "Provide the response only in this format: 'Populist Rhetoric Total Count: [number]'",  
+    "\n\nText:", text
+  )
+  
+  response <- send_to_gpt(prompt, api_key)
+  
+  if (!is.null(response)) {
+    # Optional: print the raw response for debugging
+    print(response)
+    
+    # Extract count from flexible pattern
+    count_match <- str_extract(response, "(?i)total count\\s*:\\s*\\d+")
+    count <- as.numeric(str_extract(count_match, "\\d+"))
+    
+    return(ifelse(!is.na(count), count, NA))
+  } else {
+    return(NA)
+  }
+}
+
+# Initialize vector to store populist rhetoric counts
+populist_counts <- rep(NA, nrow(trump_data))
+
+# Initialize progress bar
+pb <- txtProgressBar(min = 0, max = nrow(trump_data), style = 3)
+
+# Process tweets one by one
+for (i in 1:nrow(trump_data)) {
+  populist_counts[i] <- analyze_trump_populism(trump_data$Text[i])  # Analyze tweet
+  setTxtProgressBar(pb, i)  # Update progress bar
+}
+
+close(pb) 
+
+# Add results to dataframe
+trump_data$populist_rhetoric_count <- populist_counts
+
+# Save results
+write.csv(trump_data, "trump_tweets_with_populist_counts.csv", row.names = FALSE)
+
+# Calculate and print total populist rhetoric count
+total_populist_rhetoric_trump <- sum(trump_data$populist_rhetoric_count, na.rm = TRUE)
+print(paste("Total populist rhetoric instances across all Trump speeches:", total_populist_rhetoric_trump))
+
+#Modi analysis 
+
+# Function to analyze populist rhetoric count in Modi speeches
+analyze_modi_populism <- function(text) {
+  prompt <- paste(
+    "Analyze the following text and count the total number of individual uses of populist rhetoric.",  
+    "For every sentence or phrase that contains populist rhetoric — including repeated patterns — count each instance separately.",  
+    "Use these criteria: (1) references to ‘the people’ vs. ‘the elite’,",  
+    "(2) portraying the elite as corrupt or self-serving,",  
+    "(3) presenting the speaker as the true voice of the people,",  
+    "(4) using emotional or crisis language to polarize,",  
+    "(5) undermining the legitimacy of political or democratic institutions,",  
+    "(6) undermining the legitimacy or credibility of political opponents or other candidates.",  
+    "Provide the response only in this format: 'Populist Rhetoric Total Count: [number]'",  
+    "\n\nText:", text
+  )
+
+  
+  response <- send_to_gpt(prompt, api_key)
+  
+  if (!is.null(response)) {
+    # Optional: print the raw response for debugging
+    print(response)
+    
+    # Extract count from flexible pattern
+    count_match <- str_extract(response, "(?i)total count\\s*:\\s*\\d+")
+    count <- as.numeric(str_extract(count_match, "\\d+"))
+    
+    return(ifelse(!is.na(count), count, NA))
+  } else {
+    return(NA)
+  }
+}
+
+# Initialize vector to store populist rhetoric counts
+populist_counts_modi <- rep(NA, nrow(modi_data))
+
+# Initialize progress bar
+pb <- txtProgressBar(min = 0, max = nrow(modi_data), style = 3)
+
+# Process Modi speeches one by one
+for (i in 1:nrow(modi_data)) {
+  populist_counts_modi[i] <- analyze_modi_populism(modi_data$Text[i])  # Analyze speech
+  setTxtProgressBar(pb, i)  # Update progress bar
+}
+
+close(pb) 
+
+# Add results to dataframe
+modi_data$populist_rhetoric_count <- populist_counts_modi
+
+# Save results
+write.csv(modi_data, "modi_speeches_with_populist_counts.csv", row.names = FALSE)
+
+# Calculate and print total populist rhetoric count
+total_populist_rhetoric_modi <- sum(modi_data$populist_rhetoric_count, na.rm = TRUE)
+print(paste("Total populist rhetoric instances across all Modi speeches:", total_populist_rhetoric_modi))
+
+```
+
+# Democratic backsliding score 
+
+```{r}
+
+# Read the CSV file
+democracy_data <- read_csv("~/Downloads/democracy-index-eiu.csv")
+
+usa_data <- democracy_data %>%
+  filter(Entity %in% c("United States"))
+print(usa_data)
+
+india_data <- democracy_data %>%
+  filter(Entity %in% c("India"))
+print(india_data)
+
+
+# Extract values for 2015 and 2019
+score_2015 <- usa_data %>%
+  filter(Year == 2015) %>%
+  pull(`Democracy score`)
+
+score_2019 <- usa_data %>%
+  filter(Year == 2019) %>%
+  pull(`Democracy score`)
+
+# Calculate the difference
+difference_USA <- score_2019 - score_2015
+
+# Print the result
+print(paste("Change in Democracy Index from 2015 to 2019 (USA):", difference_USA))
+
+score_2013 <- usa_data %>%
+  filter(Year == 2013) %>%
+  pull(`Democracy score`)
+
+score_2017 <- usa_data %>%
+  filter(Year == 2017) %>%
+  pull(`Democracy score`)
+
+# Calculate the difference
+difference_India <- score_2017 - score_2013
+
+# Print the result
+print(paste("Change in Democracy Index from 2013 to 2017 (India):", difference_India))
+
+```
+
+# Plotting average per words 
+
+```{r}
+
+#Count the total of words
+modi_data$total_words <- str_count(modi_data$Text, "\\w+")
+trump_data$total_words <- str_count(trump_data$Text, "\\w+")
+
+#Create new columns (count per 100 words)
+modi_data$populist_per_100 <- (modi_data$populist_rhetoric_count / modi_data$total_words) * 100
+
+trump_data$populist_per_100 <- (trump_data$populist_rhetoric_count / trump_data$total_words) * 100
+
+#Avergae
+mean_populist_per_100_modi <- mean(modi_data$populist_per_100, na.rm = TRUE)
+mean_populist_per_100_trump <- mean(trump_data$populist_per_100, na.rm = TRUE)
+
+
+#Create combined dataset
+combined_data <- data.frame(
+  Country = c("United States", "India"),
+  Populist_Score = c(mean_populist_per_100_trump, mean_populist_per_100_modi),
+  Backsliding_Score = c(difference_USA, difference_India)
+)
+
+#Plot
+ggplot(combined_data, aes(x = Populist_Score, y = Backsliding_Score, label = Country)) +
+  geom_point(size = 5, color = "steelblue") +
+  geom_text(
+    aes(
+      vjust = ifelse(Country == "United States", 1.5, -1),
+      nudge_x = ifelse(Country == "United States", -0.1, 0)
+    ),
+    size = 5
+  ) +
+  labs(
+    title = "Normalized Populist Rhetoric vs. Democracy Backsliding",
+    subtitle = "Comparison between USA and India",
+    x = "Average Populist Rhetoric per 100 Words",
+    y = "Change in Democracy Index (Post-Election)"
+  ) +
+  xlim(0, max(combined_data$Populist_Score) * 1.2) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+
+
+```
+
+# Plotting evolution over time 
+
+```{r}
+
+#Year-Month column
+trump_data$Month <- floor_date(trump_data$Date, "month")
+modi_data$Month <- floor_date(modi_data$Date, "month")
+
+#Aggregate by month
+trump_monthly <- trump_data %>%
+  group_by(Month) %>%
+  summarise(avg_populist_per_100 = mean(populist_per_100, na.rm = TRUE))
+
+modi_monthly <- modi_data %>%
+  group_by(Month) %>%
+  summarise(avg_populist_per_100 = mean(populist_per_100, na.rm = TRUE))
+
+# Filter the data to include only 2016
+trump_monthly <- trump_monthly %>%
+  filter(lubridate::year(Month) == 2016)
+
+#Plotting Trump
+ggplot(trump_monthly, aes(x = Month, y = avg_populist_per_100)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point(color = "steelblue", size = 2) +
+  labs(
+    title = "Trump: Monthly Average Populist Rhetoric (2016)",
+    x = "Date",
+    y = "Avg. Populist Rhetoric per 100 Words"
+  ) +
+  theme_minimal(base_size = 14)
+
+#Filter the data to start at the beginning of the electoral campaign 
+modi_monthly <- modi_monthly %>%
+  filter(Month >= as.Date("2013-07-01"))
+
+#Plotting Modi
+ggplot(modi_monthly, aes(x = Month, y = avg_populist_per_100)) +
+  geom_line(color = "darkred", size = 1) +
+  geom_point(color = "darkred", size = 2) +
+  labs(
+    title = "Modi: Monthly Average Populist Rhetoric (2013-2014)",
+    x = "Date",
+    y = "Avg. Populist Rhetoric per 100 Words"
+  ) +
+  theme_minimal(base_size = 14)
+
+```
